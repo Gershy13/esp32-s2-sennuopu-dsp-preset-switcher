@@ -23,8 +23,8 @@ function connectWS() {
   };
 
   ws.onclose = () => {
-    console.log('WS closed, retrying in 1s...');
-    setTimeout(connectWS, 1000);
+    console.log('WS closed, retrying in 5s...');
+    setTimeout(connectWS, 5000);
   };
 }
 
@@ -41,24 +41,29 @@ function updateUI(data) {
   }
 }
 
-function setPreset(num) {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
-
-  const buttons = document.querySelectorAll('button');
-
-  buttons.forEach(btn => {
+function lockButtons() {
+  document.querySelectorAll('button:not(.clear-btn)').forEach(btn => {
     btn.disabled = true;
     btn.classList.add('countdown');
   });
-
-  ws.send(JSON.stringify({ cmd: "setPreset", preset: num }));
-
   setTimeout(() => {
-    buttons.forEach(btn => {
+    document.querySelectorAll('button:not(.clear-btn)').forEach(btn => {
       btn.disabled = false;
       btn.classList.remove('countdown');
     });
   }, 2000);
+}
+
+function requestCurrentPreset() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  lockButtons();
+  ws.send(JSON.stringify({ cmd: "getPreset" }));
+}
+
+function setPreset(num) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  lockButtons();
+  ws.send(JSON.stringify({ cmd: "setPreset", preset: num }));
 }
 
 function appendLog(msg) {

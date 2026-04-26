@@ -30,6 +30,27 @@ body {
     color: #388E3C; 
 }
 
+.refresh-container {
+    text-align: center;
+    margin: 0 auto 10px;
+}
+
+.refresh-btn {
+    padding: 10px 24px;
+    font-size: 14px;
+    border: 2px solid #0078D7;
+    border-radius: 8px;
+    background: transparent;
+    color: #0078D7;
+    cursor: pointer;
+    transition: 0.2s;
+}
+
+.refresh-btn:hover {
+    background: #0078D7;
+    color: white;
+}
+
 button {
     padding: 20px;
     font-size: 18px;
