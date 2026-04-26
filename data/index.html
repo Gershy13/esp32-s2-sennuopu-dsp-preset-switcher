@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>ESP32 DSP Preset Switcher v2</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <h1 class="title">ESP32 DSP Preset Switcher v2</h1>
+  <h2>DSP Status: <span id="dspStatus" class="status-red">Connecting...</span></h2>
+  <h2>Current Preset: <span id="currentPreset" class="counter">N/A</span></h2>
+
+  <div class="btn-container">
+    <button id="btn1" onclick="setPreset(1)">Preset 1</button>
+    <button id="btn2" onclick="setPreset(2)">Preset 2</button>
+    <button id="btn3" onclick="setPreset(3)">Preset 3</button>
+    <button id="btn4" onclick="setPreset(4)">Preset 4</button>
+    <button id="btn5" onclick="setPreset(5)">Preset 5</button>
+    <button id="btn6" onclick="setPreset(6)">Preset 6</button>
+  </div>
+
+  <div class="serial-monitor">
+    <div class="serial-toolbar">
+      <span class="serial-title">Serial Monitor</span>
+      <label class="autoscroll-label">
+        <input type="checkbox" id="autoScrollChk" checked onchange="toggleAutoScroll(this)">
+        Auto-scroll
+      </label>
+      <button class="clear-btn" onclick="clearLog()">Clear</button>
+      <button class="clear-btn" onclick="toggleSerialMonitor(this)">Hide</button>
+    </div>
+    <div id="serialLog" class="serial-log"></div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
