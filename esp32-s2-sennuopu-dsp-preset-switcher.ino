@@ -31,17 +31,21 @@ int currentPreset = 0;
 // ====== Web serial monitor toggle ======
 // Set to false to disable all web serial monitor output for debugging.
 // When false: wsLog() is a no-op and no log history is replayed on connect.
-const bool ENABLE_WEB_SERIAL = false;
+const bool ENABLE_WEB_SERIAL = true;
 
 // ====== Log ring buffer for web serial monitor (replayed to new clients on connect) ======
-const int  LOG_BUF_SIZE = 50;
+// Keep this well below WS_MAX_QUEUED_MESSAGES (32). On connect we send
+// LOG_BUF_SIZE history frames + ~3 init frames, so stay under ~28.
+const int  LOG_BUF_SIZE = 20;
 String     logBuf[LOG_BUF_SIZE];
 int        logHead  = 0; // index where the next entry will be written
 int        logCount = 0; // how many entries are currently stored
 
 // ====== Deferred actions — set in WS callbacks, executed safely in loop() ======
-int  pendingPreset    = 0;     // preset to send; 0 = none pending
-bool pendingGetPreset = false; // true = fetch current preset from DSP
+int      pendingPreset                  = 0;     // preset to send; 0 = none pending
+bool     pendingGetPreset               = false; // true = fetch current preset from DSP
+uint32_t pendingInitClients[4]          = {};    // client IDs that need their initial state/history sent
+int      pendingInitClientCount         = 0;     // how many are waiting
 
 // ====== Heap monitoring ======
 const unsigned long HEAP_LOG_INTERVAL_MS = 30000;
@@ -69,11 +73,11 @@ bool handlePresetResponse(const uint8_t *payload, int payload_len);
 // ====== Helper: send a log line to all WebSocket clients (for web serial monitor) ======
 void wsLog(const String& msg) {
   if (!ENABLE_WEB_SERIAL) return;
-  String json = buildLogJson(msg);
-  logBuf[logHead] = json;
+  // Store raw message string in the ring buffer for history replay
+  logBuf[logHead] = msg;
   logHead = (logHead + 1) % LOG_BUF_SIZE;
   if (logCount < LOG_BUF_SIZE) logCount++;
-  ws.textAll(json);
+  ws.textAll(buildLogJson(msg));
 }
 
 // Builds the current DSP state as a JSON string (used by notifyClients and WS connect handler)
@@ -90,6 +94,7 @@ String buildStateJson() {
 String buildLogJson(const String& msg) {
   return "{\"type\":\"log\",\"msg\":\"" + msg + "\"}";
 }
+
 
 // ====== Helper: broadcast state to all WebSocket clients (for web ui) ======
 void notifyClients() {
@@ -380,28 +385,14 @@ void handleWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
       // Close excess clients immediately — before doing anything else
       ws.cleanupClients(2);
       Serial.printf("\n--- [WebSocket] Client %u connected ---\n", client->id());
-      // Everything below uses client->text() only.
-      // Calling ws.textAll() (via notifyClients/wsLog) from inside a WS event callback
-      // is not safe — it can corrupt AsyncWebSocket's client list over time.
-      {
-        if (ENABLE_WEB_SERIAL) {
-          // Replay buffered log history to this client only
-          int start = (logHead - logCount + LOG_BUF_SIZE) % LOG_BUF_SIZE;
-          for (int i = 0; i < logCount; i++) {
-            client->text(logBuf[(start + i) % LOG_BUF_SIZE]);
-          }
-        }
-        // Send current DSP state to this client only
-        client->text(buildStateJson());
-        if (ENABLE_WEB_SERIAL) {
-          // Send connect-time info to this client only
-          client->text(buildLogJson("[WebSocket] Client " + String(client->id()) + " connected"));
-          client->text(buildLogJson("[Heap] Free: " + String(ESP.getFreeHeap()) + "b  Min free: " + String(ESP.getMinFreeHeap()) + "b"));
-        }
-        // Defer getCurrentPreset() to loop() — it chains into wsLog → textAll which is unsafe here
-        if (dspConnected && !presetFetched) {
-          pendingGetPreset = true;
-        }
+      // Queue all per-client work for loop() — calling ws.textAll() or even
+      // client->text() with large payloads from inside a WS event callback can
+      // drop frames because the handshake may not be fully settled yet.
+      if (pendingInitClientCount < 4) {
+        pendingInitClients[pendingInitClientCount++] = client->id();
+      }
+      if (dspConnected && !presetFetched) {
+        pendingGetPreset = true;
       }
       break;
 
@@ -517,6 +508,31 @@ void setup() {
 
 void loop() {
   ws.cleanupClients(2); // allow at most 2 simultaneous clients; evict older ones aggressively
+
+  // Send initial state and log history to any newly connected clients.
+  // Done here (not in WS_EVT_CONNECT) so the handshake is fully settled before we write.
+  if (pendingInitClientCount > 0) {
+    for (int i = 0; i < pendingInitClientCount; i++) {
+      AsyncWebSocketClient *c = ws.client(pendingInitClients[i]);
+      if (c && c->status() == WS_CONNECTED) {
+        // Send history entries individually — individual frames from loop() are safe
+        // and we know they land (the connect/heap messages below use the same path).
+        // A single large batched frame gets silently dropped by AsyncWebSocket.
+        if (ENABLE_WEB_SERIAL && logCount > 0) {
+          int start = (logHead - logCount + LOG_BUF_SIZE) % LOG_BUF_SIZE;
+          for (int i = 0; i < logCount; i++) {
+            c->text(buildLogJson(logBuf[(start + i) % LOG_BUF_SIZE]));
+          }
+        }
+        c->text(buildStateJson());
+        if (ENABLE_WEB_SERIAL) {
+          c->text(buildLogJson("[WebSocket] Client " + String(c->id()) + " connected"));
+          c->text(buildLogJson("[Heap] Free: " + String(ESP.getFreeHeap()) + "b  Min free: " + String(ESP.getMinFreeHeap()) + "b"));
+        }
+      }
+    }
+    pendingInitClientCount = 0;
+  }
 
   if (pendingGetPreset && dspConnected) {
     pendingGetPreset = false;
