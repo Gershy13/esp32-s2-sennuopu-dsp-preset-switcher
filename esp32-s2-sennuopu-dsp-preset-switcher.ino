@@ -23,9 +23,10 @@ AsyncWebSocket ws("/ws");
 
 USBhost host;
 
-bool dspConnected = false;
+bool dspConnected  = false;
+bool presetFetched = false; // true once we have a confirmed preset from the DSP
 usb_device_handle_t dspHandle = nullptr;
-int currentPreset = 0; // 1..6 as per your UI
+int currentPreset = 0;
 
 // ====== Log ring buffer for web serial monitor (replayed to new clients on connect) ======
 const int  LOG_BUF_SIZE = 50;
@@ -35,6 +36,7 @@ int        logCount = 0; // how many entries are currently stored
 
 // ====== Forward declarations ======
 void notifyClients();
+void wsLog(const String& msg);
 void handleWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
                    AwsEventType type, void *arg, uint8_t *data, size_t len);
 size_t hexStringToBytes(const char *hexStr, uint8_t *out, size_t maxLen);
@@ -45,6 +47,7 @@ void createPresetPayload(uint8_t preset, uint8_t *hid_payload);
 void sendDisconnectToDSP();
 void pollDSP();
 void getCurrentPreset();
+bool handlePresetResponse(const uint8_t *payload, int payload_len);
 
 // ====== Utility/Helper functions ======
 
@@ -118,14 +121,16 @@ void client_event_callback(const usb_host_client_event_msg_t *event_msg, void *a
   } else if (event_msg->event == USB_HOST_CLIENT_EVENT_DEV_GONE) {
     Serial.println("\n--- [USB] Device disconnected ---");
     wsLog("[USB] DSP disconnected");
-    dspConnected = false;
+    dspConnected  = false;
+    presetFetched = false;
+    currentPreset = 0;
     dspHandle = nullptr;
     host.close();
     notifyClients();
   }
 }
 
-// ====== USB control transfer callback (handles HID GET_REPORT and SET_REPORT responses from DSP) ======
+// ====== USB control transfer callback for HID GET_REPORT and SET_REPORT responses — dispatches to the appropriate response handler ======
 void control_transfer_callback(usb_transfer_t *transfer) {
   if (transfer->status != USB_TRANSFER_STATUS_COMPLETED) {
     Serial.printf("\n--- [Control Transfer] FAILED (status: %d) ---\n", transfer->status);
@@ -133,44 +138,30 @@ void control_transfer_callback(usb_transfer_t *transfer) {
     return;
   }
 
-  uint8_t *payload    = transfer->data_buffer;
-  int      payload_len = transfer->actual_num_bytes;
+  const uint8_t *payload    = transfer->data_buffer;
+  const int      payload_len = transfer->actual_num_bytes;
 
-  if (payload_len > 0) {
-    Serial.printf("\n--- [Control Transfer] OK (%d bytes) ---\n", payload_len);
-    Serial.print("  Data: ");
-    String hexStr = "";
-    char hexByte[4];
-    for (int i = 0; i < payload_len; i++) {
-      snprintf(hexByte, sizeof(hexByte), "%02X ", payload[i]);
-      Serial.print(hexByte);
-      hexStr += hexByte;
-    }
-    Serial.println();
-    wsLog("[Transfer] OK " + String(payload_len) + "b: " + hexStr);
+  if (payload_len <= 0) return;
 
-    // If the response matches the GET_REPORT preset response signature, parse the preset
-    const uint8_t targetSequence[] = {
-      0x74, 0x00, 0xE0, 0xA2, 0x70, 0x00,
-      0xB0, 0x00, 0x00, 0x55, 0x55, 0x55, 0x55, 0x55, 0x00
-    };
-    const size_t targetLen = sizeof(targetSequence);
-
-    if (payload_len >= (int)targetLen && memcmp(payload, targetSequence, targetLen) == 0) {
-      if (payload_len > (int)targetLen) {
-        currentPreset = payload[targetLen];
-        Serial.printf("  Preset response — current preset: %d\n", currentPreset);
-        wsLog("[Transfer] Preset response - current preset: " + String(currentPreset));
-      }
-      // Log 16-bit interpretation while exact format is still being determined
-      if (payload_len >= (int)targetLen + 2) {
-        uint16_t preset16 = (payload[targetLen] << 8) | payload[targetLen + 1];
-        Serial.printf("  Preset (16-bit read): %d\n", preset16);
-        wsLog("[Transfer] Preset (16-bit read): " + String(preset16));
-      }
-      notifyClients();
-    }
+  Serial.printf("\n--- [Control Transfer] OK (%d bytes) ---\n", payload_len);
+  Serial.print("  Data: ");
+  String hexStr = "";
+  char hexByte[4];
+  for (int i = 0; i < payload_len; i++) {
+    snprintf(hexByte, sizeof(hexByte), "%02X ", payload[i]);
+    Serial.print(hexByte);
+    hexStr += hexByte;
   }
+  Serial.println();
+  wsLog("[Transfer] OK " + String(payload_len) + "b: " + hexStr);
+
+  // Dispatch to response handlers in order of priority.
+  // Each handler returns true if it claimed the response.
+  if (handlePresetResponse(payload, payload_len)) return;
+
+  // No handler matched — log for debugging
+  Serial.println("  No handler matched this response");
+  wsLog("[Transfer] Unrecognised response");
 }
 
 // ====== Send HID SET_REPORT control transfer to DSP ======
@@ -254,6 +245,38 @@ void getCurrentPreset() {
   sendGetReportToDSP();
 }
 
+// ====== Response handlers for DSP GET_REPORT responses ======
+
+// ====== Handler: handle getCurrentPreset GET_REPORT response ======
+bool handlePresetResponse(const uint8_t *payload, int payload_len) {
+  // Signature that identifies a preset-info GET_REPORT response.
+  // Preceded by an 8-byte header, so it does not start at byte 0.
+  // The preset number is the byte immediately following the signature.
+  const uint8_t sig[] = {
+    0x74, 0x00, 0xE0, 0xA2, 0x70, 0x00,
+    0xB0, 0x00, 0x00, 0x55, 0x55, 0x55, 0x55, 0x55, 0x00
+  };
+  const size_t sigLen = sizeof(sig);
+
+  for (int i = 0; i <= payload_len - (int)sigLen; i++) {
+    if (memcmp(payload + i, sig, sigLen) == 0) {
+      int presetOffset = i + (int)sigLen;
+      if (payload_len > presetOffset) {
+        currentPreset = payload[presetOffset];
+        presetFetched = true;
+        Serial.printf("  Preset response (signature at byte %d) — current preset: %d\n", i, currentPreset);
+        wsLog("[Preset] Current preset: " + String(currentPreset));
+        notifyClients();
+      } else {
+        Serial.println("  Preset response signature matched but payload too short for preset byte");
+        wsLog("[Preset] ERROR: Signature matched but payload truncated");
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
 // ====== Create HID SET_REPORT payload from preset number to send to DSP ======
 void createPresetPayload(uint8_t preset, uint8_t *hid_payload) {
   // Confirmed payload format from Wireshark:
@@ -335,6 +358,11 @@ void handleWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
       }
       notifyClients();
       wsLog("[WebSocket] Client " + String(client->id()) + " connected");
+      // Fetch preset once from DSP on first connection after DSP connects
+      if (dspConnected && !presetFetched) {
+        wsLog("[Preset] Fetching current preset from DSP...");
+        getCurrentPreset();
+      }
       break;
 
     case WS_EVT_DISCONNECT:
@@ -362,7 +390,7 @@ void handleWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
               Serial.printf("\n--- [WebSocket] Set preset: %d ---\n", preset);
               wsLog("[WebSocket] Set preset: " + String(preset));
               sendPresetToDSP(preset);
-              delay(300); // allow DSP time to process the preset change
+              delay(1000); // allow DSP time to process the preset change
               getCurrentPreset();
             }
           }
