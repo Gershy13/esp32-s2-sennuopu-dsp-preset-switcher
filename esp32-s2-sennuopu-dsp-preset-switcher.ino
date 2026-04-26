@@ -28,13 +28,28 @@ bool presetFetched = false; // true once we have a confirmed preset from the DSP
 usb_device_handle_t dspHandle = nullptr;
 int currentPreset = 0;
 
+// ====== Web serial monitor toggle ======
+// Set to false to disable all web serial monitor output for debugging.
+// When false: wsLog() is a no-op and no log history is replayed on connect.
+const bool ENABLE_WEB_SERIAL = false;
+
 // ====== Log ring buffer for web serial monitor (replayed to new clients on connect) ======
 const int  LOG_BUF_SIZE = 50;
 String     logBuf[LOG_BUF_SIZE];
 int        logHead  = 0; // index where the next entry will be written
 int        logCount = 0; // how many entries are currently stored
 
+// ====== Deferred actions — set in WS callbacks, executed safely in loop() ======
+int  pendingPreset    = 0;     // preset to send; 0 = none pending
+bool pendingGetPreset = false; // true = fetch current preset from DSP
+
+// ====== Heap monitoring ======
+const unsigned long HEAP_LOG_INTERVAL_MS = 30000;
+unsigned long       lastHeapLogMs        = 0;
+
 // ====== Forward declarations ======
+String buildStateJson();
+String buildLogJson(const String& msg);
 void notifyClients();
 void wsLog(const String& msg);
 void handleWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
@@ -53,23 +68,32 @@ bool handlePresetResponse(const uint8_t *payload, int payload_len);
 
 // ====== Helper: send a log line to all WebSocket clients (for web serial monitor) ======
 void wsLog(const String& msg) {
-  String json = "{\"type\":\"log\",\"msg\":\"" + msg + "\"}";
+  if (!ENABLE_WEB_SERIAL) return;
+  String json = buildLogJson(msg);
   logBuf[logHead] = json;
   logHead = (logHead + 1) % LOG_BUF_SIZE;
   if (logCount < LOG_BUF_SIZE) logCount++;
   ws.textAll(json);
 }
 
-// ====== Helper: broadcast state to all WebSocket clients (for web ui) ======
-void notifyClients() {
-  String json = "{";
-  json += "\"dspConnected\":";
+// Builds the current DSP state as a JSON string (used by notifyClients and WS connect handler)
+String buildStateJson() {
+  String json = "{\"dspConnected\":";
   json += (dspConnected ? "true" : "false");
-  json += ",";
-  json += "\"currentPreset\":";
+  json += ",\"currentPreset\":";
   json += currentPreset;
   json += "}";
-  ws.textAll(json);
+  return json;
+}
+
+// Builds a log message as a JSON string (used by wsLog and WS connect handler)
+String buildLogJson(const String& msg) {
+  return "{\"type\":\"log\",\"msg\":\"" + msg + "\"}";
+}
+
+// ====== Helper: broadcast state to all WebSocket clients (for web ui) ======
+void notifyClients() {
+  ws.textAll(buildStateJson());
 }
 
 // ====== Utility: parse hex string into byte array ======
@@ -145,23 +169,19 @@ void control_transfer_callback(usb_transfer_t *transfer) {
 
   Serial.printf("\n--- [Control Transfer] OK (%d bytes) ---\n", payload_len);
   Serial.print("  Data: ");
-  String hexStr = "";
   char hexByte[4];
   for (int i = 0; i < payload_len; i++) {
     snprintf(hexByte, sizeof(hexByte), "%02X ", payload[i]);
     Serial.print(hexByte);
-    hexStr += hexByte;
   }
   Serial.println();
-  wsLog("[Transfer] OK " + String(payload_len) + "b: " + hexStr);
 
   // Dispatch to response handlers in order of priority.
   // Each handler returns true if it claimed the response.
+  // Only matched handlers write to wsLog — unmatched responses (e.g. poll acks) are silently ignored.
   if (handlePresetResponse(payload, payload_len)) return;
 
-  // No handler matched — log for debugging
   Serial.println("  No handler matched this response");
-  wsLog("[Transfer] Unrecognised response");
 }
 
 // ====== Send HID SET_REPORT control transfer to DSP ======
@@ -318,16 +338,25 @@ void sendPresetToDSP(int preset) {
   sendGetReportToDSP(); // acknowledge the trigger — response not parsed for preset info
 }
 
-// ====== Send HID SET_REPORT to DSP to poll the DSP (not used in current flow) ======
+// ====== DSP keepalive poll — sent silently every POLL_INTERVAL_MS ======
+// Bypasses sendSetReportToDSP intentionally to avoid spamming the serial monitor.
+// Keepalive payload from Wireshark: e0 a2 04 00 b0 00 15 a5
 void pollDSP() {
   if (!dspConnected || !dspHandle) return;
-  // Confirmed polling/keepalive payload from Wireshark: e0 a2 04 00 b0 00 15 a5
+
   const char *hexInput = "e0a20400b00015a5";
   uint8_t payload[256] = {0};
   uint8_t data[128];
   size_t dataLen = hexStringToBytes(hexInput, data, sizeof(data));
   memcpy(payload, data, dataLen);
-  sendSetReportToDSP(payload, sizeof(payload));
+
+  esp_err_t err = host.sendControlTransfer(0x21, 0x09, 0x0200, wIndex,
+                                           sizeof(payload), payload,
+                                           control_transfer_callback);
+  if (err != ESP_OK) {
+    Serial.printf("[Poll] Keepalive failed (%d)\n", err);
+    wsLog("[Poll] ERROR: Keepalive failed (" + String(err) + ")");
+  }
 }
 
 // ====== Send HID SET_REPORT to DSP to disconnect from the DSP (not used in current flow) ======
@@ -348,20 +377,31 @@ void handleWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
                    AwsEventType type, void *arg, uint8_t *data, size_t len) {
   switch (type) {
     case WS_EVT_CONNECT:
+      // Close excess clients immediately — before doing anything else
+      ws.cleanupClients(2);
       Serial.printf("\n--- [WebSocket] Client %u connected ---\n", client->id());
-      // Replay buffered log history to the newly connected client
+      // Everything below uses client->text() only.
+      // Calling ws.textAll() (via notifyClients/wsLog) from inside a WS event callback
+      // is not safe — it can corrupt AsyncWebSocket's client list over time.
       {
-        int start = (logHead - logCount + LOG_BUF_SIZE) % LOG_BUF_SIZE;
-        for (int i = 0; i < logCount; i++) {
-          client->text(logBuf[(start + i) % LOG_BUF_SIZE]);
+        if (ENABLE_WEB_SERIAL) {
+          // Replay buffered log history to this client only
+          int start = (logHead - logCount + LOG_BUF_SIZE) % LOG_BUF_SIZE;
+          for (int i = 0; i < logCount; i++) {
+            client->text(logBuf[(start + i) % LOG_BUF_SIZE]);
+          }
         }
-      }
-      notifyClients();
-      wsLog("[WebSocket] Client " + String(client->id()) + " connected");
-      // Fetch preset once from DSP on first connection after DSP connects
-      if (dspConnected && !presetFetched) {
-        wsLog("[Preset] Fetching current preset from DSP...");
-        getCurrentPreset();
+        // Send current DSP state to this client only
+        client->text(buildStateJson());
+        if (ENABLE_WEB_SERIAL) {
+          // Send connect-time info to this client only
+          client->text(buildLogJson("[WebSocket] Client " + String(client->id()) + " connected"));
+          client->text(buildLogJson("[Heap] Free: " + String(ESP.getFreeHeap()) + "b  Min free: " + String(ESP.getMinFreeHeap()) + "b"));
+        }
+        // Defer getCurrentPreset() to loop() — it chains into wsLog → textAll which is unsafe here
+        if (dspConnected && !presetFetched) {
+          pendingGetPreset = true;
+        }
       }
       break;
 
@@ -376,24 +416,28 @@ void handleWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
       for (size_t i = 0; i < len; i++) msg += (char)data[i];
       msg.trim();
 
-      if (msg.indexOf("\"cmd\"") >= 0 && msg.indexOf("setPreset") >= 0) {
-        int pKey = msg.indexOf("\"preset\"");
-        if (pKey >= 0) {
-          int colon = msg.indexOf(':', pKey);
-          if (colon >= 0) {
-            int end = msg.indexOf('}', colon);
-            String pStr = msg.substring(colon + 1, end);
-            pStr.trim();
-            int preset = pStr.toInt();
+      if (msg.indexOf("\"cmd\"") >= 0) {
+        if (msg.indexOf("setPreset") >= 0) {
+          int pKey = msg.indexOf("\"preset\"");
+          if (pKey >= 0) {
+            int colon = msg.indexOf(':', pKey);
+            if (colon >= 0) {
+              int end = msg.indexOf('}', colon);
+              String pStr = msg.substring(colon + 1, end);
+              pStr.trim();
+              int preset = pStr.toInt();
 
-            if (preset >= 1 && preset <= 6) {
-              Serial.printf("\n--- [WebSocket] Set preset: %d ---\n", preset);
-              wsLog("[WebSocket] Set preset: " + String(preset));
-              sendPresetToDSP(preset);
-              delay(1000); // allow DSP time to process the preset change
-              getCurrentPreset();
+              if (preset >= 1 && preset <= 6) {
+                Serial.printf("\n--- [WebSocket] Set preset: %d ---\n", preset);
+                wsLog("[WebSocket] Set preset: " + String(preset));
+                pendingPreset = preset; // executed in loop() to avoid blocking the AsyncTCP task
+              }
             }
           }
+        } else if (msg.indexOf("getPreset") >= 0) {
+          Serial.println("\n--- [WebSocket] Get current preset requested ---");
+          wsLog("[WebSocket] Get current preset requested");
+          getCurrentPreset();
         }
       }
       break;
@@ -472,5 +516,27 @@ void setup() {
 }
 
 void loop() {
-  ws.cleanupClients();
+  ws.cleanupClients(2); // allow at most 2 simultaneous clients; evict older ones aggressively
+
+  if (pendingGetPreset && dspConnected) {
+    pendingGetPreset = false;
+    wsLog("[Preset] Fetching current preset from DSP...");
+    getCurrentPreset();
+  }
+
+  if (pendingPreset > 0) {
+    int preset = pendingPreset;
+    pendingPreset = 0;
+    sendPresetToDSP(preset);
+    delay(1000); // safe here — runs in the Arduino main task, not the AsyncTCP task
+    getCurrentPreset();
+  }
+
+  unsigned long now = millis();
+  if (now - lastHeapLogMs >= HEAP_LOG_INTERVAL_MS) {
+    lastHeapLogMs = now;
+    String heapMsg = "[Heap] Free: " + String(ESP.getFreeHeap()) + "b  Min free: " + String(ESP.getMinFreeHeap()) + "b";
+    Serial.println(heapMsg);
+    wsLog(heapMsg);
+  }
 }
