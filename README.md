@@ -129,18 +129,27 @@ The HID payloads were reverse-engineered from Wireshark USB captures and are def
 ```
 SET_REPORT (select preset)
   Prefix:  e0 a2 05 00 b7 00 06
-  + preset byte:  01 - 06 (depending on preset number)
-  + checksum:     9e 9f a0 a1 a2 a3  (for presets 1–6 respectively)
+  + preset byte:  01 / 02 / 03 / 04 / 05 / 06 (depending on preset number)
+  + checksum:     9e / 9f / a0 / a1 / a2 / a3  (for presets 1–6 respectively)
+  + padding to 256 bytes (0x00)
+
+SET_REPORT (disconnect)
+  e0 a2 05 00 b7 00 03 aa 44
+  + padding to 256 bytes (0x00)
+
+SET_REPORT (keepalive poll)
+  e0 a2 04 00 b0 00 15 a5
   + padding to 256 bytes (0x00)
 
 SET_REPORT (query current preset)
-  Prefix: e0 a2 05 00 b0 00 04 00 94
-  + padding to 256 bytes (0x00)
+  e0 a2 05 00 b0 00 04 00 94
++ padding to 256 bytes (0x00)
 
-//TODO
-GET_REPORT response signature (bytes 0–14)
-  74 00 e0 a2 70 00 b0 00 00 55 55 55 55 55 00
-  Preset number is at byte 15.
+GET_REPORT response signature (currently selected preset) 
+  74 00 e0 a2 70 00 b0 00 00 55 55 55 55 55 00 [preset]
+  Preset number is the byte immediately following the signature.
+  (15 bytes, searched anywhere in the payload)
+  (Preceded by an 8-byte transfer header, so the signature does not start at byte 0.)
 ```
 
 ## Web UI
@@ -159,19 +168,23 @@ No sketch reflash is needed for UI-only changes.
 The WebSocket sends and receives JSON:
 
 ```json
-// ESP32 → Browser (broadcast to all connected clients)
+// Connection Init (ESP32 → Browser) (broadcasted to all connected clients)
 { "dspConnected": true, "currentPreset": 3 }
 
-// Browser → ESP32
+// Set Preset (Browser → ESP32)
 { "cmd": "setPreset", "preset": 3 }
 
-// TODO:
-// Browser → ESP32
-{ "cmd": "getCurrentPreset" }
+// Get Current Preset (Browser → ESP32)
+{ "cmd": "getPreset" }
 ```
+
+There is also a web based serial monitor for logging and debugging purposes. 
+
+Note: This is currently limited to 20 messages of history due to the 32 frame limit of the AsyncWebSocket send queue.
 
 ## Planned Enhancements
 
 - Displaying current preset with colour map on integrated ESP32 RGB LED
 - Using GPIO0 onboard button to cycle through presets
 - Integrating ESPNow support for using another ESP to control the presets and read the statuses wirelessly
+- Increase web serial monitor max history by using batching
