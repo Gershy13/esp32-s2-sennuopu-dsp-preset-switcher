@@ -184,6 +184,7 @@ Note: This is currently limited to 20 messages of history due to the 32 frame li
 
 ## Planned Enhancements
 
+- Migrate to PlatformIO
 - Displaying current preset with colour map on integrated ESP32 RGB LED
 - Using GPIO0 onboard button to cycle through presets
 - Integrating ESPNow support for using another ESP to control the presets and read the statuses wirelessly
