@@ -14,6 +14,8 @@ function connectWS() {
       const data = JSON.parse(ev.data);
       if (data.type === 'log') {
         appendLog(data.msg);
+      } else if (data.type === 'history') {
+        data.msgs.forEach(msg => appendLog(msg));
       } else {
         updateUI(data);
       }

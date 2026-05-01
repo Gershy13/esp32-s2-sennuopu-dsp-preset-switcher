@@ -34,9 +34,9 @@ int currentPreset = 0;
 const bool ENABLE_WEB_SERIAL = true;
 
 // ====== Log ring buffer for web serial monitor (replayed to new clients on connect) ======
-// Keep this well below WS_MAX_QUEUED_MESSAGES (32). On connect we send
-// LOG_BUF_SIZE history frames + ~3 init frames, so stay under ~28.
-const int  LOG_BUF_SIZE = 20;
+// On connect, the full history is sent as one {"type":"history","msgs":[...]} frame.
+// One frame uses only 1 of the 32 WS_MAX_QUEUED_MESSAGES slots regardless of entry count.
+const int  LOG_BUF_SIZE = 100;
 String     logBuf[LOG_BUF_SIZE];
 int        logHead  = 0; // index where the next entry will be written
 int        logCount = 0; // how many entries are currently stored
@@ -495,7 +495,7 @@ void setup() {
   Serial.println("\n--- [HTTP Server] Starting ---");
   ws.onEvent(handleWsEvent);
   server.addHandler(&ws);
-  server.serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
+  server.serveStatic("/", LittleFS, "/").setDefaultFile("index.html").setCacheControl("no-cache");
   server.onNotFound([](AsyncWebServerRequest *request) {
     request->send(404, "text/plain", "Not found");
   });
@@ -515,19 +515,22 @@ void loop() {
     for (int i = 0; i < pendingInitClientCount; i++) {
       AsyncWebSocketClient *c = ws.client(pendingInitClients[i]);
       if (c && c->status() == WS_CONNECTED) {
-        // Send history entries individually — individual frames from loop() are safe
-        // and we know they land (the connect/heap messages below use the same path).
-        // A single large batched frame gets silently dropped by AsyncWebSocket.
+        // Send the full history as a single JSON frame on connection of a new client.
         if (ENABLE_WEB_SERIAL && logCount > 0) {
           int start = (logHead - logCount + LOG_BUF_SIZE) % LOG_BUF_SIZE;
+          String history = "{\"type\":\"history\",\"msgs\":[";
           for (int i = 0; i < logCount; i++) {
-            c->text(buildLogJson(logBuf[(start + i) % LOG_BUF_SIZE]));
+            if (i > 0) history += ",";
+            history += "\"";
+            history += logBuf[(start + i) % LOG_BUF_SIZE];
+            history += "\"";
           }
+          history += "]}";
+          c->text(history);
         }
         c->text(buildStateJson());
         if (ENABLE_WEB_SERIAL) {
           c->text(buildLogJson("[WebSocket] Client " + String(c->id()) + " connected"));
-          c->text(buildLogJson("[Heap] Free: " + String(ESP.getFreeHeap()) + "b  Min free: " + String(ESP.getMinFreeHeap()) + "b"));
         }
       }
     }
