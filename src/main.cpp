@@ -1,3 +1,5 @@
+#include <Arduino.h>
+
 // --- Networking / Web ---
 #include <WiFi.h>
 #include <ESPmDNS.h>
@@ -51,6 +53,13 @@ int      pendingInitClientCount         = 0;     // how many are waiting
 const unsigned long HEAP_LOG_INTERVAL_MS = 30000;
 unsigned long       lastHeapLogMs        = 0;
 
+// ====== LED blink state (non-blocking) ======
+const unsigned long LED_BLINK_INTERVAL_MS = 500;
+unsigned long       lastLedMs             = 0;
+bool                ledOn                 = false;
+
+const int LED_PRESET_BRIGHTNESS = 100;
+
 // ====== Forward declarations ======
 String buildStateJson();
 String buildLogJson(const String& msg);
@@ -67,6 +76,7 @@ void sendDisconnectToDSP();
 void pollDSP();
 void getCurrentPreset();
 bool handlePresetResponse(const uint8_t *payload, int payload_len);
+void setLedToPresetColour(int preset);
 
 // ====== Utility/Helper functions ======
 
@@ -292,6 +302,8 @@ bool handlePresetResponse(const uint8_t *payload, int payload_len) {
         Serial.printf("  Preset response (signature at byte %d) — current preset: %d\n", i, currentPreset);
         wsLog("[Preset] Current preset: " + String(currentPreset));
         notifyClients();
+        // Set LED to preset colour
+        setLedToPresetColour(currentPreset);
       } else {
         Serial.println("  Preset response signature matched but payload too short for preset byte");
         wsLog("[Preset] ERROR: Signature matched but payload truncated");
@@ -443,11 +455,15 @@ void handleWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
 // ====== General Arduino/ESP32 functions ======
 void setup() {
   Serial.begin(115200);
+  neopixelWrite(RGB_BUILTIN, 0,0,0); 
   delay(100);
 
   Serial.println("\n========================================");
   Serial.println("    ESP32 DSP Preset Switcher");
   Serial.println("========================================");
+
+  // ---- GPIO ----
+  pinMode(0, INPUT_PULLUP);
 
   // ---- WiFi ----
   Serial.println("\n--- [WiFi] Connecting ---");
@@ -456,6 +472,9 @@ void setup() {
   WiFi.begin(ssid, password);
 
   while (WiFi.status() != WL_CONNECTED) {
+    neopixelWrite(RGB_BUILTIN, 255,0,0);
+    delay(400);
+    neopixelWrite(RGB_BUILTIN, 0,0,0);
     delay(400);
     Serial.print('.');
   }
@@ -465,6 +484,7 @@ void setup() {
   Serial.println("  Connected!");
   Serial.println("  IP:   " + ip);
   wsLog("[WiFi] Connected - IP: " + ip);
+  neopixelWrite(RGB_BUILTIN, 0,255,0); 
 
   if (MDNS.begin("esp32dsp")) {
     Serial.println("  mDNS: http://esp32dsp.local");
@@ -507,8 +527,24 @@ void setup() {
 }
 
 void loop() {
-  ws.cleanupClients(2); // allow at most 2 simultaneous clients; evict older ones aggressively
+  if (dspConnected) {
+    if (presetFetched) {
+      setLedToPresetColour(currentPreset);
+    } else {
+      // DSP connected but preset not yet known — solid blue
+      neopixelWrite(RGB_BUILTIN, 0, 0, LED_PRESET_BRIGHTNESS);
+    }
+  } else {
+    // No DSP — flash blue
+    unsigned long now = millis();
+    if (now - lastLedMs >= LED_BLINK_INTERVAL_MS) {
+      lastLedMs = now;
+      ledOn = !ledOn;
+      neopixelWrite(RGB_BUILTIN, 0, 0, ledOn ? 255 : 0);
+    }
+  }
 
+  ws.cleanupClients(2); // allow at most 2 simultaneous clients; evict older ones aggressively
   // Send initial state and log history to any newly connected clients.
   // Done here (not in WS_EVT_CONNECT) so the handshake is fully settled before we write.
   if (pendingInitClientCount > 0) {
@@ -557,5 +593,46 @@ void loop() {
     String heapMsg = "[Heap] Free: " + String(ESP.getFreeHeap()) + "b  Min free: " + String(ESP.getMinFreeHeap()) + "b";
     Serial.println(heapMsg);
     wsLog(heapMsg);
+  }
+
+  // Handle GPIO button press to cycle through presets
+  if (digitalRead(0) == LOW) {
+    currentPreset++;
+    if (currentPreset > 6) {
+      currentPreset = 1;
+    }
+    setLedToPresetColour(currentPreset);
+  }
+  delay(100);
+}
+
+
+void setLedToPresetColour(int preset) {
+  // Preset colour mapping:
+  // 1: Red
+  // 2: Green
+  // 3: Blue
+  // 4: Yellow
+  // 5: Purple
+  // 6: White
+  switch (preset) {
+    case 1:
+      neopixelWrite(RGB_BUILTIN, LED_PRESET_BRIGHTNESS,0,0);
+      break;
+    case 2:
+      neopixelWrite(RGB_BUILTIN, 0,LED_PRESET_BRIGHTNESS,0);
+      break;
+    case 3:
+      neopixelWrite(RGB_BUILTIN, 0,0,LED_PRESET_BRIGHTNESS);
+      break;
+    case 4:
+      neopixelWrite(RGB_BUILTIN, LED_PRESET_BRIGHTNESS,LED_PRESET_BRIGHTNESS,0);
+      break;
+    case 5:
+      neopixelWrite(RGB_BUILTIN, LED_PRESET_BRIGHTNESS,0,LED_PRESET_BRIGHTNESS);
+      break;
+    case 6:
+      neopixelWrite(RGB_BUILTIN, LED_PRESET_BRIGHTNESS,LED_PRESET_BRIGHTNESS,LED_PRESET_BRIGHTNESS);
+      break;
   }
 }
