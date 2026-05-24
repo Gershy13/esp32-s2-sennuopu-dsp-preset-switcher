@@ -27,5 +27,6 @@ extern int logCount;
 // Pending actions (defined in main.cpp)
 extern int pendingPreset;
 extern bool pendingGetPreset;
+extern bool pendingRestart;
 extern uint32_t pendingInitClients[];
 extern int pendingInitClientCount;

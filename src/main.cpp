@@ -3,6 +3,7 @@
 #include <ESPmDNS.h>
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
+#include <Update.h>
 #include <LittleFS.h>
 #include "globals.h"
 #include "secrets.h"
@@ -22,6 +23,7 @@ int logCount = 0;
 
 int pendingPreset = 0;
 bool pendingGetPreset = false;
+bool pendingRestart = false;
 uint32_t pendingInitClients[4] = {};
 int pendingInitClientCount = 0;
 
@@ -64,6 +66,7 @@ void setup()
   wsLog("[WiFi] Connecting...");
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
+  //WiFi.begin(ssid_dev, password_dev); // Uncomment to use dev wifi during development
 
   // Blink LED while waiting for WiFi connection
   while (WiFi.status() != WL_CONNECTED)
@@ -124,6 +127,88 @@ void setup()
   ws.onEvent(handleWsEvent);
   server.addHandler(&ws);
   server.serveStatic("/", LittleFS, "/").setDefaultFile("index.html").setCacheControl("no-cache");
+
+  // Device info endpoint
+  server.on("/api/info", HTTP_GET, [](AsyncWebServerRequest *request) {
+    String json = "{";
+    json += "\"ip\":\"" + WiFi.localIP().toString() + "\"";
+    json += ",\"hostname\":\"esp32dsp\"";
+    json += ",\"chip\":\"" + String(ESP.getChipModel()) + "\"";
+    json += ",\"cpuFreqMHz\":" + String(ESP.getCpuFreqMHz());
+    json += ",\"flashSizeMB\":" + String(ESP.getFlashChipSize() / 1048576);
+    json += ",\"freeHeapKB\":" + String(ESP.getFreeHeap() / 1024);
+    json += ",\"uptimeSec\":" + String(millis() / 1000);
+    json += "}";
+    request->send(200, "application/json", json);
+  });
+
+  // Restart endpoint — called by the UI after OTA uploads are complete
+  server.on("/api/restart", HTTP_POST, [](AsyncWebServerRequest *request) {
+    request->send(200, "application/json", "{\"ok\":true}");
+    pendingRestart = true;
+  });
+
+  // OTA — firmware upload
+  server.on(
+      "/api/ota/firmware", HTTP_POST,
+      [](AsyncWebServerRequest *request) {
+        bool ok = !Update.hasError();
+        AsyncWebServerResponse *r = request->beginResponse(
+            200, "application/json",
+            ok ? "{\"ok\":true}"
+               : "{\"ok\":false,\"error\":\"" + String(Update.errorString()) + "\"}");
+        r->addHeader("Connection", "close");
+        request->send(r);
+      },
+      [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
+        if (!index)
+        {
+          wsLog("[OTA] Firmware upload started: " + filename);
+          if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH))
+            wsLog("[OTA] ERROR: " + String(Update.errorString()));
+        }
+        if (Update.write(data, len) != len)
+          wsLog("[OTA] Write error: " + String(Update.errorString()));
+        if (final)
+        {
+          if (Update.end(true))
+            wsLog("[OTA] Firmware flashed — awaiting reboot command");
+          else
+            wsLog("[OTA] ERROR: " + String(Update.errorString()));
+        }
+      });
+
+  // OTA — LittleFS filesystem upload
+  server.on(
+      "/api/ota/filesystem", HTTP_POST,
+      [](AsyncWebServerRequest *request) {
+        bool ok = !Update.hasError();
+        AsyncWebServerResponse *r = request->beginResponse(
+            200, "application/json",
+            ok ? "{\"ok\":true}"
+               : "{\"ok\":false,\"error\":\"" + String(Update.errorString()) + "\"}");
+        r->addHeader("Connection", "close");
+        request->send(r);
+      },
+      [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
+        if (!index)
+        {
+          wsLog("[OTA] Storage upload started: " + filename);
+          LittleFS.end(); // unmount before overwriting flash
+          if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_SPIFFS))
+            wsLog("[OTA] ERROR: " + String(Update.errorString()));
+        }
+        if (Update.write(data, len) != len)
+          wsLog("[OTA] Write error: " + String(Update.errorString()));
+        if (final)
+        {
+          if (Update.end(true))
+            wsLog("[OTA] Storage flashed — awaiting reboot command");
+          else
+            wsLog("[OTA] ERROR: " + String(Update.errorString()));
+        }
+      });
+
   server.onNotFound([](AsyncWebServerRequest *request)
                     { request->send(404, "text/plain", "Not found"); });
   server.begin();
@@ -133,6 +218,13 @@ void setup()
 
 void loop()
 {
+  // Restart after a successful OTA flash
+  if (pendingRestart)
+  {
+    delay(500);
+    ESP.restart();
+  }
+
   // Set LED based on DSP connection status
   if (dsp.isConnected())
   {
