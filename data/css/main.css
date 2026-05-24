@@ -1,0 +1,169 @@
+/* ── Settings cog (fixed, top-right) ── */
+.settings-cog {
+    position: fixed;
+    top: 14px;
+    right: 16px;
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    padding: 0;
+    transition: background 0.2s, color 0.2s, transform 0.3s;
+    box-shadow: 0 2px 8px var(--shadow);
+}
+.settings-cog:hover {
+    background: var(--surface2);
+    color: var(--text);
+    transform: rotate(30deg);
+}
+
+/* ── Page headings & status ── */
+.title {
+    font-size: 28px;
+    font-weight: bold;
+    letter-spacing: 2px;
+    margin: 30px 0 20px;
+}
+
+.counter {
+    font-size: 60px;
+    font-weight: 300;
+    margin: 10px;
+}
+
+.status-red   { font-size: 24px; margin: 10px; color: #d32f2f; }
+.status-green { font-size: 24px; margin: 10px; color: #388E3C; }
+
+/* ── Refresh button ── */
+.refresh-container {
+    text-align: center;
+    margin: 0 auto 10px;
+}
+
+.refresh-btn {
+    padding: 10px 24px;
+    font-size: 14px;
+    border: 2px solid var(--accent);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--accent);
+    cursor: pointer;
+    transition: 0.2s;
+}
+.refresh-btn:hover {
+    background: var(--accent);
+    color: #ffffff;
+}
+
+/* ── Preset buttons ── */
+.btn-container {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 15px;
+    max-width: 400px;
+    margin: 30px auto;
+}
+
+button {
+    padding: 20px;
+    font-size: 18px;
+    border: none;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #ffffff;
+    cursor: pointer;
+    transition: background 0.3s;
+    position: relative;
+    overflow: hidden;
+}
+button:hover { background: var(--accent-hover); }
+
+.btn-container button.active { background: var(--active) !important; }
+button:disabled {
+    background: var(--disabled-bg) !important;
+    cursor: not-allowed;
+}
+
+button::after {
+    content: "";
+    position: absolute;
+    top: 0; right: 0;
+    height: 100%; width: 0%;
+    background: rgba(0, 0, 0, 0.2);
+    z-index: 1;
+}
+button.countdown::after {
+    animation: countdownFill 2s linear forwards;
+}
+@keyframes countdownFill {
+    0%   { width: 0%; }
+    100% { width: 100%; }
+}
+
+/* ── Serial monitor ── */
+.serial-monitor {
+    max-width: 700px;
+    margin: 30px auto 40px;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    text-align: left;
+}
+
+.serial-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    background: var(--serial-toolbar);
+    color: #ccc;
+    font-size: 13px;
+}
+
+.serial-title {
+    font-weight: bold;
+    color: #fff;
+    flex: 1;
+}
+
+.autoscroll-label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.clear-btn {
+    padding: 3px 10px;
+    font-size: 12px;
+    background: #555;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+.clear-btn:hover { background: #777; }
+
+.serial-log {
+    height: 300px;
+    overflow-y: auto;
+    background: var(--serial-bg);
+    color: var(--serial-text);
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 13px;
+    padding: 10px 12px;
+    box-sizing: border-box;
+    white-space: pre-wrap;
+    word-break: break-all;
+}

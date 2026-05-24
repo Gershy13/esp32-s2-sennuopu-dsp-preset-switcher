@@ -1,12 +1,17 @@
 <!DOCTYPE html>
 <html data-theme="light">
 <head>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" charset="UTF-8">
   <title>DSP Preset Switcher</title>
   <link rel="icon" type="image/png" href="/favicon.png">
-  <link rel="stylesheet" href="/style.css">
+
+  <!-- ═══ Stylesheets ══════════════════════════════════════════════════════ -->
+  <link rel="stylesheet" href="/css/base.css">
+  <link rel="stylesheet" href="/css/main.css">
+  <link rel="stylesheet" href="/css/modal.css">
+
+  <!-- Apply saved theme before first paint to avoid flash -->
   <script>
-    // Apply saved theme before first paint to avoid flash
     (function () {
       const t = localStorage.getItem('theme') || 'light';
       document.documentElement.setAttribute('data-theme', t);
@@ -15,12 +20,14 @@
 </head>
 <body>
 
+  <!-- ═══ Settings Cog (fixed, top-right) ══════════════════════════════════ -->
   <button class="settings-cog" onclick="openSettings()" title="Settings" aria-label="Open settings">
     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
       <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
     </svg>
   </button>
 
+  <!-- ═══ DSP Status & Preset Control ══════════════════════════════════════ -->
   <h1 class="title">ESP32 DSP Preset Switcher v2</h1>
   <h2>DSP Status: <span id="dspStatus" class="status-red">Connecting...</span></h2>
   <h2>Current Preset: <span id="currentPreset" class="counter">N/A</span></h2>
@@ -38,6 +45,7 @@
     <button id="btn6" onclick="setPreset(6)">Preset 6</button>
   </div>
 
+  <!-- ═══ Serial Monitor ═══════════════════════════════════════════════════ -->
   <div class="serial-monitor">
     <div class="serial-toolbar">
       <span class="serial-title">Serial Monitor</span>
@@ -51,68 +59,98 @@
     <div id="serialLog" class="serial-log"></div>
   </div>
 
-  <!-- Settings Modal -->
+  <!-- ═══ Settings Modal ═══════════════════════════════════════════════════ -->
   <div class="modal-overlay" id="settingsModal" onclick="handleOverlayClick(event)">
     <div class="modal">
+
       <div class="modal-header">
         <h3 class="modal-title">Settings</h3>
         <button class="modal-close" onclick="closeSettings()" aria-label="Close">&#x2715;</button>
       </div>
+
       <div class="modal-body">
 
-      <section class="modal-section">
-        <h4 class="section-title">Device Info</h4>
-        <div id="deviceInfo"><div class="info-loading">Loading&hellip;</div></div>
-      </section>
+        <!-- Device Info -->
+        <section class="modal-section">
+          <h4 class="section-title">Device Info</h4>
+          <div id="deviceInfo"><div class="info-loading">Loading&hellip;</div></div>
+        </section>
 
-      <section class="modal-section">
-        <h4 class="section-title">Appearance</h4>
-        <div class="toggle-row">
-          <span>Dark Mode</span>
-          <label class="toggle-switch">
-            <input type="checkbox" id="darkModeToggle" onchange="toggleDarkMode(this)">
-            <span class="toggle-thumb"></span>
-          </label>
-        </div>
-      </section>
-
-      <section class="modal-section">
-        <h4 class="section-title">Firmware Update</h4>
-        <p class="section-hint">Flash a new <code>.bin</code> firmware image. The device will reboot automatically.</p>
-        <div class="upload-area">
-          <div class="upload-row">
-            <input type="file" id="firmwareFile" accept=".bin">
-            <button class="upload-btn" id="firmwareUploadBtn" onclick="uploadOTA('firmware')">Upload</button>
+        <!-- Appearance -->
+        <section class="modal-section">
+          <h4 class="section-title">Appearance</h4>
+          <div class="toggle-row">
+            <span>Dark Mode</span>
+            <label class="toggle-switch">
+              <input type="checkbox" id="darkModeToggle" onchange="toggleDarkMode(this)">
+              <span class="toggle-thumb"></span>
+            </label>
           </div>
-          <div class="progress-bar-track"><div class="progress-bar-fill" id="firmwareProgress"></div></div>
-          <div class="upload-status" id="firmwareStatus"></div>
-        </div>
-      </section>
+        </section>
 
-      <section class="modal-section">
-        <h4 class="section-title">Storage Update</h4>
-        <p class="section-hint">Flash a new <code>.littlefs.bin</code> filesystem image (replaces web UI files).</p>
-        <div class="upload-area">
-          <div class="upload-row">
-            <input type="file" id="fsFile" accept=".bin">
-            <button class="upload-btn" id="fsUploadBtn" onclick="uploadOTA('filesystem')">Upload</button>
+        <!-- OTA Firmware & Storage Update -->
+        <section class="modal-section">
+          <h4 class="section-title">Firmware &amp; Storage Update</h4>
+          <p class="section-hint">Drop one or both <code>.bin</code> files. Files containing <code>littlefs</code> in the name are assigned to Storage automatically.</p>
+
+          <div class="drop-zone" id="dropZone"
+               onclick="triggerFileDialog()"
+               ondragover="handleDragOver(event)"
+               ondragleave="handleDragLeave(event)"
+               ondrop="handleDrop(event)">
+            <input type="file" id="otaFileInput" multiple accept=".bin" style="display:none" onchange="handleFileSelect(event)">
+            <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="drop-zone-icon" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="17 8 12 3 7 8"/>
+              <line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+            <span class="drop-zone-text">Drop <code>.bin</code> files here<br><small>or click to browse</small></span>
           </div>
-          <div class="progress-bar-track"><div class="progress-bar-fill" id="fsProgress"></div></div>
-          <div class="upload-status" id="fsStatus"></div>
-        </div>
-      </section>
 
-      <section class="modal-section">
-        <h4 class="section-title">Reboot</h4>
-        <p class="section-hint" id="rebootHint">Upload at least one image above, then reboot to apply.</p>
-        <button class="reboot-btn" id="rebootBtn" onclick="rebootDevice()" disabled>Reboot Device</button>
-        <div class="upload-status" id="rebootStatus"></div>
-      </section>
+          <div class="slot-grid">
+            <div class="slot" id="firmwareSlot">
+              <div class="slot-header">
+                <span class="slot-type">Firmware</span>
+                <button class="slot-clear" id="firmwareClearBtn" onclick="clearSlot('firmware')" style="display:none" aria-label="Clear firmware">&#x2715;</button>
+              </div>
+              <div class="slot-file" id="firmwareSlotFile">Not assigned</div>
+              <div class="progress-bar-track" id="firmwareProgressTrack" style="display:none">
+                <div class="progress-bar-fill" id="firmwareProgress"></div>
+              </div>
+              <div class="upload-status" id="firmwareStatus"></div>
+            </div>
+            <div class="slot" id="fsSlot">
+              <div class="slot-header">
+                <span class="slot-type">Storage</span>
+                <button class="slot-clear" id="fsClearBtn" onclick="clearSlot('filesystem')" style="display:none" aria-label="Clear storage">&#x2715;</button>
+              </div>
+              <div class="slot-file" id="fsSlotFile">Not assigned</div>
+              <div class="progress-bar-track" id="fsProgressTrack" style="display:none">
+                <div class="progress-bar-fill" id="fsProgress"></div>
+              </div>
+              <div class="upload-status" id="fsStatus"></div>
+            </div>
+          </div>
+
+          <button class="upload-btn upload-btn-full" id="uploadAllBtn" onclick="uploadAll()" disabled>Upload</button>
+        </section>
+
+        <!-- Reboot -->
+        <section class="modal-section">
+          <h4 class="section-title">Reboot</h4>
+          <p class="section-hint" id="rebootHint">Upload at least one image above, then reboot to apply.</p>
+          <button class="reboot-btn" id="rebootBtn" onclick="rebootDevice()" disabled>Reboot Device</button>
+          <div class="upload-status" id="rebootStatus"></div>
+        </section>
 
       </div><!-- /.modal-body -->
-    </div>
-  </div>
+    </div><!-- /.modal -->
+  </div><!-- /.modal-overlay -->
 
-  <script src="/app.js?v=2"></script>
+  <!-- ═══ Scripts ══════════════════════════════════════════════════════════ -->
+  <script src="/js/websocket.js"></script>
+  <script src="/js/serial.js"></script>
+  <script src="/js/modal.js"></script>
+
 </body>
 </html>

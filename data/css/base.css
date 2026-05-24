@@ -1,0 +1,55 @@
+/* ── Theme variables ── */
+:root {
+    --bg:             #f0f2f5;
+    --surface:        #ffffff;
+    --surface2:       #e8eaed;
+    --text:           #333333;
+    --text-muted:     #777777;
+    --border:         #d0d0d0;
+    --accent:         #0078D7;
+    --accent-hover:   #005a9e;
+    --active:         #34A853;
+    --disabled-bg:    #cccccc;
+    --serial-bg:      #1e1e1e;
+    --serial-toolbar: #2d2d2d;
+    --serial-text:    #4ec94e;
+    --overlay:        rgba(0, 0, 0, 0.45);
+    --shadow:         rgba(0, 0, 0, 0.12);
+    --modal-bg:       #ffffff;
+    --section-bg:     #f7f8fa;
+    --code-bg:        #e8eaed;
+}
+
+[data-theme="dark"] {
+    --bg:             #111111;
+    --surface:        #1c1c1e;
+    --surface2:       #2c2c2e;
+    --text:           #f0f0f0;
+    --text-muted:     #8e8e93;
+    --border:         #3a3a3c;
+    --accent:         #4da3ff;
+    --accent-hover:   #70b8ff;
+    --active:         #4caf76;
+    --disabled-bg:    #3a3a3c;
+    --serial-bg:      #0d1117;
+    --serial-toolbar: #161b22;
+    --serial-text:    #4ec94e;
+    --overlay:        rgba(0, 0, 0, 0.65);
+    --shadow:         rgba(0, 0, 0, 0.5);
+    --modal-bg:       #1c1c1e;
+    --section-bg:     #111111;
+    --code-bg:        #2c2c2e;
+}
+
+/* ── Reset & base ── */
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+    font-family: Arial, sans-serif;
+    color: var(--text);
+    background: var(--bg);
+    text-align: center;
+    transition: background 0.25s, color 0.25s;
+    margin: 0;
+    padding: 0 12px 40px;
+}
