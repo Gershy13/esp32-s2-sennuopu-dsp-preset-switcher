@@ -1,0 +1,19 @@
+{
+  "name": "SennuopuDSP",
+  "version": "0.1.0",
+  "description": "Arduino/PlatformIO library for controlling a Sennuopu DSP processor via USB HID on the ESP32-S2. Supports preset switching, keepalive polling, and event callbacks.",
+  "keywords": ["usb", "hid", "dsp", "audio", "esp32-s2", "sennuopu", "preset"],
+  "authors": {
+    "name": "Gershy13",
+    "url": "https://github.com/Gershy13"
+  },
+  "license": "MIT",
+  "frameworks": ["arduino"],
+  "platforms": ["espressif32"],
+  "dependencies": [
+    {
+      "name": "ESP32TinyUSB-extended-usb-host",
+      "version": "1.0.0"
+    }
+  ]
+}
