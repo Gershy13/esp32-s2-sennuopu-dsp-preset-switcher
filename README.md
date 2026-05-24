@@ -24,14 +24,22 @@ Currently only tested on the Sennuopu DS-M10 Pro.
 ## Repository layout
 
 ```
-├── esp32-s2-sennuopu-dsp-preset-switcher.ino   Main sketch
-├── usb_host.hpp                                 USB host wrapper
+├── src/
+│   ├── main.cpp                                 Main sketch
+│   └── web_server.cpp / web_server.h            HTTP server, WebSocket, OTA endpoints
 ├── secrets.h           (git-ignored)            WiFi credentials — you create this
 ├── secrets.h.example                            Template for secrets.h
+├── platformio.ini                               PlatformIO build configuration
 ├── data/
-│   ├── index.html                               Web UI
-│   ├── style.css                                Styles
-│   └── app.js                                   WebSocket + UI logic
+│   ├── index.html                               Web UI (structure)
+│   ├── css/
+│   │   ├── base.css                             Theme variables, reset, body
+│   │   ├── main.css                             Headings, preset buttons, serial monitor
+│   │   └── modal.css                            Settings modal, OTA, slots, reboot
+│   └── js/
+│       ├── websocket.js                         WebSocket connection, preset control
+│       ├── serial.js                            Serial monitor log
+│       └── modal.js                             Settings modal, device info, OTA upload, reboot
 └── .gitignore
 ```
 
@@ -48,49 +56,54 @@ const char *password = "YOUR_WIFI_PASSWORD";
 
 `secrets.h` is listed in `.gitignore` and will never be committed.
 
-### 2. Arduino IDE libraries
+### 2. Dependencies
 
-Install these libraries via **Tools → Manage Libraries**:
+All dependencies are declared in `platformio.ini` and fetched automatically by PlatformIO on first build:
 
-| Library | Tested version |
+| Library | `lib_deps` entry |
 |---|---|
-| ESP Async WebServer | ≥ 1.2.3 |
-| AsyncTCP | ≥ 1.1.1 |
-| EspTinyUSB-extended-usb-host | ≥ 1.0.0 |
+| ESPAsyncWebServer | `esp32async/ESPAsyncWebServer@^3.11.0` |
+| AsyncTCP | `esp32async/AsyncTCP@^3.4.10` |
+| EspTinyUSB-extended-usb-host | `https://github.com/Gershy13/EspTinyUSB-extended-usb-host.git` |
 
-The ESP32 Arduino core (espressif/arduino-esp32) provides `WiFi`, `LittleFS`, and the `mDNS` libraries.
+The ESP32 Arduino core (espressif/arduino-esp32) provides `WiFi`, `LittleFS`, and `mDNS`.
 
-The USB host functionality currently requires the use of my fork of the EspTinyUSB library that extends it with USB host support. The original library may be expanded to add usb host support in the future.
-Install it manually:
-
-1. Download or clone **[Gershy13/EspTinyUSB-extended-usb-host](https://github.com/Gershy13/EspTinyUSB-extended-usb-host)**
-2. In the Arduino IDE: **Sketch → Include Library → Add .ZIP Library…** and select the downloaded folder (or zip it first if cloned)
+The USB host functionality requires my fork of EspTinyUSB which extends it with USB host support. It is pulled directly from GitHub via the `lib_deps` URL above — no manual install needed.
 
 ### 3. Board settings
 
+Tested on the **ESP32-S2-DevKitC-1 N8R2** (8 MB flash, 2 MB PSRAM). The relevant `platformio.ini` settings are:
+
 | Setting | Value |
 |---|---|
-| Board | ESP32S2 Dev Module (any S2 board should work, S3 or other ESP32s with usb support may work, but untested) |
-| Partition Scheme | Default 4MB with spiffs (any scheme with a data partition should work) |
+| `board` | `esp32-s2-saola-1` |
+| `board_build.flash_size` | `8MB` |
+| `board_upload.flash_size` | `8MB` |
+| `board_build.flash_mode` | `qio` |
+| `board_build.partitions` | `default_8MB.csv` (OTA-enabled, built-in PlatformIO table) |
+
+The OTA partition scheme reserves two equal-sized app slots (`ota_0` / `ota_1`) so firmware can be updated wirelessly without a USB cable.
 
 ### 4. Upload the filesystem
 
 The web UI lives in the `data/` folder and must be written to the ESP32's LittleFS partition
 **separately** from the sketch itself.
 
-- **Arduino IDE 1.x** — install the
-  [arduino-esp32fs-plugin](https://github.com/lorol/arduino-esp32fs-plugin),
-  then use **Tools → ESP32 LittleFS Data Upload**.
-- **Arduino IDE 2.x** — install the
-  [LittleFS uploader](https://github.com/earlephilhower/arduino-littlefs-upload) extension,
-  then press **Ctrl+Shift+P → Upload LittleFS to Pico/ESP8266/ESP32**.
+Using PlatformIO:
+```
+pio run --target upload    # flash firmware
+pio run --target uploadfs  # flash LittleFS
+```
 
-Upload the `data/` folder **before or after** flashing the sketch — order does not matter.
+Upload the `data/` folder **before or after** flashing the firmware — order does not matter.
 
-### 5. Flash the sketch
+### 5. Flash the firmware
 
-Compile and upload normally. Open the Serial Monitor at **115200 baud**.
-The IP address and mDNS hostname are printed on connection:
+```
+pio run --target upload
+```
+
+Open the serial monitor at **115200 baud** — the IP address and mDNS hostname are printed on connection:
 
 ```
 WiFi connected
@@ -105,7 +118,7 @@ If mDNS isn't supported by your OS or router, use the raw IP address instead.
 
 ## Adapting for a different DSP
 
-Device-specific initalisation values are near the top of the `.ino`:
+Device-specific initialisation values are near the top of `src/main.cpp`:
 
 ```cpp
 const uint16_t TARGET_VID = 0x8888;  // USB Vendor ID of your DSP
@@ -154,13 +167,17 @@ GET_REPORT response signature (currently selected preset)
 
 ## Web UI
 
-The UI is three files in `data/`:
+The UI is split across `data/css/` and `data/js/` subdirectories:
 
 | File | Purpose |
 |---|---|
-| `index.html` | Page structure and preset buttons |
-| `style.css` | Layout, button states, countdown animation |
-| `app.js` | WebSocket connection, UI updates, preset commands |
+| `index.html` | Page structure, preset buttons, settings modal |
+| `css/base.css` | Theme variables (light/dark), reset, body |
+| `css/main.css` | Settings cog, headings, preset buttons, serial monitor |
+| `css/modal.css` | Settings modal, device info, dark mode toggle, OTA slots, reboot button |
+| `js/websocket.js` | WebSocket connection, UI updates, preset commands |
+| `js/serial.js` | Serial monitor log (append, clear, auto-scroll, show/hide) |
+| `js/modal.js` | Settings modal, device info fetch, dark mode, OTA drag-and-drop upload, reboot + reconnect poll |
 
 After editing any of these files, re-upload the `data/` folder to LittleFS.
 No sketch reflash is needed for UI-only changes.
@@ -182,7 +199,15 @@ There is also a web based serial monitor for logging and debugging purposes.
 
 Note: This is currently limited to 20 messages of history due to the 32 frame limit of the AsyncWebSocket send queue.
 
+### Settings modal
+
+A gear icon (top-right) opens a settings panel with:
+
+- **Device Info** — IP address, hostname, chip model, CPU frequency, flash size, free heap, uptime (fetched live from `/api/info`).
+- **Appearance** — dark/light mode toggle (persisted in `localStorage`).
+- **Firmware & Storage Update** — drag-and-drop (or click-to-browse) area that accepts one or two `.bin` files. Files with `littlefs` in the name are assigned to the Storage slot; all other `.bin` files go to the Firmware slot. Both are uploaded sequentially to `/api/ota/firmware` and `/api/ota/filesystem` with a live progress bar per slot.
+- **Reboot** — enabled only after at least one image has been successfully flashed. Sends a POST to `/api/restart`, then polls `/api/info` until the device is back online and automatically reloads the page.
+
 ## Planned Enhancements
 
 - Integrating ESPNow support for using another ESP to control the presets and read the statuses wirelessly
-- Refactor to use proper OOP

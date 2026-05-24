@@ -148,7 +148,7 @@ void setup()
     pendingRestart = true;
   });
 
-  // OTA — firmware upload
+  // OTA — firmware upload endpoint
   server.on(
       "/api/ota/firmware", HTTP_POST,
       [](AsyncWebServerRequest *request) {
@@ -178,7 +178,7 @@ void setup()
         }
       });
 
-  // OTA — LittleFS filesystem upload
+  // OTA — LittleFS filesystem upload endpoint
   server.on(
       "/api/ota/filesystem", HTTP_POST,
       [](AsyncWebServerRequest *request) {
