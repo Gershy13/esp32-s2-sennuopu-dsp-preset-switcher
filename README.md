@@ -210,4 +210,4 @@ A gear icon (top-right) opens a settings panel with:
 
 ## Planned Enhancements
 
-- Integrating ESPNow support for using another ESP to control the presets and read the statuses wirelessly
+- ~Integrating ESPNow support for using another ESP to control the presets and read the statuses wirelessly~ **COMPLETED**
