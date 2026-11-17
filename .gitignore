@@ -1,5 +1,6 @@
 # WiFi credentials — never commit
 secrets.h
+espnow_peers.h
 
 # PlatformIO
 .pio

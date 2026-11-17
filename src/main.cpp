@@ -8,6 +8,9 @@
 #include "globals.h"
 #include "secrets.h"
 #include "web_server.h"
+#include "espnow_handler.h"
+#include <esp_wifi.h>
+#include "espnow_peers.h"
 
 // --- Global definitions ---
 AsyncWebServer server(80);
@@ -83,8 +86,16 @@ void setup()
   Serial.println();
   Serial.println("[WiFi] Connected!");
   Serial.println("[WiFi] IP:   " + ip);
+  Serial.println("[WiFi] MAC:  " + WiFi.macAddress());
   wsLog("[WiFi] Connected - IP: " + ip);
+  wsLog("[WiFi] MAC:  " + WiFi.macAddress());
   neopixelWrite(RGB_BUILTIN, 0, 255, 0);
+
+  // ESP-NOW — must be initialised after WiFi.begin() so the channel is locked
+  espNowInit();
+  espNowAddTrustedPeer(ESP_DEVICE_1_MAC); // Ensure espnow_peers.h is updated with the actual MAC addresses
+  espNowAddTrustedPeer(ESP_DEVICE_2_MAC); // Add more devices as needed
+  esp_wifi_set_ps(WIFI_PS_NONE); // Disable Wi-Fi sleep to prevent ESP-NOW packet loss
 
   // mDNS
   if (MDNS.begin("esp32dsp"))
@@ -115,6 +126,7 @@ void setup()
     wsLog("[DSP] Current preset: " + String(preset));
     notifyClients();
     setLedToPresetColour(preset);
+    espNowBroadcastPreset(preset);
   });
 
   Serial.println("[USB] Initialising...");

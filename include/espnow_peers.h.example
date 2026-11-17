@@ -1,0 +1,6 @@
+#pragma once
+#include <stdint.h>
+
+static const uint8_t ESP_DEVICE_1_MAC[6] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00}; // Replace with actual MAC address
+static const uint8_t ESP_DEVICE_2_MAC[6] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00}; // Replace with actual MAC address
+// Add more devices as needed
